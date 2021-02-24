@@ -1,7 +1,9 @@
 # from utils import *
 from discretize import *
 import random
+import itertools
 import torch
+import torch.nn as nn
 device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
 class Agent:
@@ -73,3 +75,50 @@ class DiscreteAgent(Agent):
         else: raise Exception("Invalid mode!")
 
         return predicted_action
+
+
+class ContinuousQLearningAgent(Agent):
+    def __init__(self, obs_size, n_action_buckets, action_ranges):
+        super().__init__()
+
+        
+        self.obs_size = obs_size
+
+        _, buckets = make_table_and_buckets(n_action_buckets, action_ranges)
+        buckets = [list(arr) for arr in buckets]
+        self.actions = list(itertools.product(*buckets))
+        self.num_actions = len(self.actions)
+
+
+        self.q_net = nn.Sequential(
+            nn.Linear(obs_size, 64),
+            nn.Linear(64, 64),
+            nn.Linear(64, self.num_actions)
+        ).to(device)
+
+
+
+    def predict(self, observation, epsilon=0):
+        observation = torch.Tensor(observation).to(device)
+        if self.mode == 'train':
+            if random.random() >= epsilon:
+                q_values = self.q_net(observation)
+                (_, predicted_index)= torch.max(q_values, dim=0)
+                predicted_action = self.actions[predicted_index]
+            else:
+                # generate random
+                predicted_index = random.randint(0, self.num_actions-1) 
+                predicted_action = self.actions[predicted_index]
+                q_values = self.q_net(observation)
+
+        elif self.mode == 'test':
+            q_values = self.q_net(observation)
+            (_, predicted_index)= torch.max(q_values, dim=0)
+            predicted_action = self.actions[predicted_index]
+
+            return predicted_action
+
+        else: raise Exception("Invalid mode!")
+    
+        return (predicted_action, q_values)
+
