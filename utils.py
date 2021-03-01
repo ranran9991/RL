@@ -1,18 +1,21 @@
 import numpy as np
 
 
-def evaulate(env, model, num_steps=1000):
-    episode_rewards=[0.0]
+def evaulate(env, model, num_episodes=5, show_render=True):
+    episode_rewards=[]
     obs = env.reset()
-    for i in range(num_steps):
-        action = model.predict(obs)
-        obs, reward, done, info = env.step(action)
+    for i in range(num_episodes):
+        obs = env.reset()
+        episode_rewards.append(0.0)
+        done = False
+        # steps = 1
+        while not done:
+            action = model.predict(obs)
+            obs, reward, done, info = env.step(action)
+            print(f"action chosen: {action}")
+            # print(obs)
+            if show_render: env.render()
+            episode_rewards[-1] += reward
 
-        episode_rewards[-1] += reward
-
-        if done:
-            obs = env.reset()
-            episode_rewards.append(0.0)
-
-    mean = np.round(np.mean(episode_rewards[-100:]), 1)
+    mean = np.round(np.mean(episode_rewards),1)
     return mean
