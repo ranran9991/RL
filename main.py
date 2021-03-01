@@ -2,22 +2,41 @@ import gym
 # import matplotlib.pyplot as plt
 # import numpy as np
 # from sys import getsizeof
-from discretize import *
-from agent import DiscreteAgent
-from trainer import TDTrainer
+from agent import DiscreteAgent, DiscreteAgent_compact
+from trainer import TD0_Trainer
 # from time import time
 
 if __name__=='__main__':
-    Y_LIMIT = (0.0, 5.0)
-    ANGLE_LIMIT = (-10.0, 10.0)
-    ANGULAR_VELOCITY = (-5.0, 5.0)
-    LIMITS = [(-1, 1), Y_LIMIT, (-5.0, 5.0), (-5.0, 5.0), ANGLE_LIMIT, ANGULAR_VELOCITY, (-0.1,1.1), (-0.1,1.1)]
+    X_LIMIT = (-1.2, 1.2)
+    Y_LIMIT = (0.0, 1.5)
+    X_VELOCITY = (-3.0, 3.0)
+    Y_VELOCITY = (-3.0, 3.0)
+    ANGLE_LIMIT = (-2.0, 2.0)
+    ANGULAR_VELOCITY = (-2.0, 2.0)
+    IS_LEFT_TOUCH_GROUND = (-0.1,1.1)
+    IS_RIGHT_TOUCH_GROUND = (-0.1,1.1)
+    LIMITS = [X_LIMIT,
+              Y_LIMIT,
+              X_VELOCITY,
+              Y_VELOCITY,
+              ANGLE_LIMIT,
+              ANGULAR_VELOCITY,
+              IS_LEFT_TOUCH_GROUND,
+              IS_RIGHT_TOUCH_GROUND]
 
-    NUM_BUCKETS = [5, 5, 5, 5, 5, 5, 2, 2]
-    table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
+    NUM_BUCKETS = [4, 4, 3, 3, 4, 4, 2, 2] # [5, 5, 5, 5, 2]
+
+    MAIN_ENGINE_LIMIT = (-1, 1)
+    LEFT_RIGHT_ENGINE_LIMIT = (-1, 1)
+    ACTION_LIMITS = [MAIN_ENGINE_LIMIT, LEFT_RIGHT_ENGINE_LIMIT]
+    ACTION_NUM_BUCKETS = [5,7]
+
+    # table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
+    # table2, buckets2 = compact_Q_table(NUM_BUCKETS, LIMITS, ACTION_NUM_BUCKETS, ACTION_LIMITS, 'concat')
 
     env = gym.make('LunarLanderContinuous-v2')
     obs = env.reset()
+    env.render()
 
     # action = env.action_space.sample()
     # observation, reward, done, info = env.step(action)
@@ -63,9 +82,8 @@ if __name__=='__main__':
     #
     # plt.show()
 
-    ACTION_LIMITS = [(-1, 1), (-1, 1)]
-    ACTION_NUM_BUCKETS = [5, 5]
-
-    agent1 = DiscreteAgent(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
-    trainer = TDTrainer(0.1, epsilon=0.3, discount=0.9, lamda=1)
-    trainer.train(env,agent1,100,2)
+    pass
+    # agent1 = DiscreteAgent(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    agent1 = DiscreteAgent_compact(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    trainer = TD0_Trainer(0.5, epsilon=0.6, discount=0.999, lamda=1)
+    trainer.train(env,agent1,2000,25)
