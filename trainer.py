@@ -8,7 +8,7 @@ from datetime import datetime
 import torch
 import torch.optim as optim
 import torch.nn as nn
-
+import torch.nn.functional as F
 
 class Trainer:
     def __init__(self, lr, epsilon, discount):
@@ -106,6 +106,7 @@ class QLearningTrainer(Trainer):
 
         self.episode_counter = 0
 
+
     def train_episode(self, env, agent : ContinuousQLearningAgent):
         self.episode_counter += 1
 
@@ -118,23 +119,28 @@ class QLearningTrainer(Trainer):
             # update target net
             target_net.q_net = copy.deepcopy(self.prediction_net.q_net)
 
-        mse = nn.MSELoss()
+        # mse = nn.MSELoss() # consider checking L1
+        mse = lambda x,y : F.smooth_l1_loss(x,y)
+
 
         obs = env.reset()
         done = False
         steps = 1
 
         while not done:
+            print_output = f" {steps} " if (steps % 10 == 0 or steps == 1) else "."
+            print(print_output, end='')
             (action, curr_q_val) = self.prediction_net.predict(obs, epsilon=self.epsilon)
             curr_q_val.retain_grad()
             action_index = torch.argmax(curr_q_val)
             observation, reward, done, _ = env.step(np.array(action))
-            (_, next_q_val) = target_net.predict(observation, epsilon=0.0)
-            next_q_val = next_q_val.detach()
+            (action_new, next_q_val) = target_net.predict(observation, epsilon=0.0) # Q-Learning!
+            next_q_val = next_q_val.detach() # remove gradients history
+            action_index_new = torch.argmax(next_q_val)
 
             target_q_vals = reward
             if not done:
-                target_q_vals += next_q_val[action_index.item()]*self.discount
+                target_q_vals += next_q_val[action_index_new.item()]*self.discount
 
             target_vec = curr_q_val.clone()
             target_vec[action_index.item()] = target_q_vals
@@ -147,3 +153,107 @@ class QLearningTrainer(Trainer):
             obs = observation
 
         return steps
+
+
+
+class BatchedTrainer:
+    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq):
+        self.lr = lr
+        self.epsilon = epsilon
+        self.discount = discount
+        self.batch_size = batch_size
+        self.replay_buffer = ReplayMemory(buffer_capacity)
+        self.update_freq = update_freq
+        self.policy_net = None
+        self.optimizer = None
+
+    def train(self, env, agent:ContinuousQLearningAgent, episodes, eval_freq):
+        t0=datetime.now()
+        print(f"Run started at {t0}")
+        rewards_list, steps_list = [], []
+
+        self.policy_net = copy.deepcopy(agent)
+        self.optimizer = optim.Adam(self.policy_net.q_net.parameters(), lr = self.lr)
+
+        for e in range(episodes):
+            agent.mode = 'train'
+            # print(f"Starting episode {e}: steps performed: ",end='')
+            print(f"Episode {e}: steps performed: ",end='')
+
+            if e % self.update_freq == 0:
+                agent.q_net.load_state_dict(self.policy_net.q_net.state_dict())
+
+            obs = env.reset()
+            done = False
+            steps = 1
+
+            while not done:
+                print_output = f" {steps} " if (steps % 10 == 0 or steps == 1) else "."
+                print(print_output, end='')
+                (action, curr_q_val) = self.policy_net.predict(obs, epsilon=self.epsilon)
+                observation, reward, done, _ = env.step(np.array(action))
+                f = lambda t: torch.tensor(t,dtype=torch.float).to(device).unsqueeze(dim=0)
+                self.replay_buffer.push(f(obs), f(action), f(observation), f(reward))
+                self.train_batch(agent)
+
+                obs = observation
+
+            steps_list.append(steps)
+
+            if e % eval_freq==0 and e!=0:
+                agent.mode='test'
+                print(f"\n\tEvaluating: ",end='')
+                show_render = e%(5*eval_freq)==0
+                avg_reward = evaulate(env, agent,show_render=show_render)
+                rewards_list.append(avg_reward)
+                print(f"avg reward = {avg_reward}",end='') # insert weights_and_biases !
+                # print(f"Finished Evaluation")
+
+                # Epsilon & lr decay:
+                self.epsilon = self.epsilon * 0.94**(e // eval_freq)
+                self.lr = self.lr * 0.98**(e//eval_freq)
+
+            print(f"\nFinished episode {e}")
+            # print("done.")
+
+        print(f"Steps per episode: {steps_list}, avg = {np.round(np.mean(steps_list),2)}")
+        print(f"Average rewards: {rewards_list}")
+        print(f"Run ended in {datetime.now()}; total runtime = {datetime.now()-t0}")
+
+        plt.figure()
+        plt.plot(rewards_list)
+        plt.show()
+
+
+    def train_batch(self, agent:ContinuousQLearningAgent):
+        if len(self.replay_buffer)<self.batch_size:
+            return
+
+        sampled_transitions = self.replay_buffer.sample(self.batch_size)
+        batch = Transition(*zip(*sampled_transitions))
+
+        state_batch = torch.cat(batch.state,dim=0)
+        action_batch = torch.cat(batch.action,dim=0)
+        reward_batch = torch.cat(batch.reward,dim=0)
+
+        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), device=device, dtype=torch.bool)
+        non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+
+        # state_action_values = agent.predict(state_batch).gather(1, action_batch)
+        state_action_values = agent.q_net(state_batch).gather(1, action_batch)
+
+
+        next_state_values = torch.zeros(self.batch_size, device=device)
+        next_state_values[non_final_mask] = self.policy_net.q_net(non_final_next_states).max(1)[0].detach()
+
+        expected_state_action_values = (next_state_values * self.discount) + reward_batch
+
+        # Compute Huber loss
+        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+
+        # Optimize the model
+        self.optimizer.zero_grad()
+        loss.backward()
+        for param in self.policy_net.parameters():
+            param.grad.data.clamp_(-1, 1)
+        self.optimizer.step()

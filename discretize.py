@@ -1,6 +1,6 @@
 import numpy as np
 from itertools import product
-from scipy.stats import binned_statistic_2d
+# from scipy.stats import binned_statistic_2d
 
 
 def make_table_and_buckets(num_buckets, ranges):

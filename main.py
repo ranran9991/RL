@@ -3,7 +3,7 @@ import gym
 # import numpy as np
 # from sys import getsizeof
 from discretize import *
-from trainer import QLearningTrainer, TD0_Trainer
+from trainer import *
 from agent import DiscreteAgent, DiscreteAgent_compact, ContinuousQLearningAgent
 # from time import time
 
@@ -30,7 +30,7 @@ if __name__=='__main__':
     MAIN_ENGINE_LIMIT = (-1, 1)
     LEFT_RIGHT_ENGINE_LIMIT = (-1, 1)
     ACTION_LIMITS = [MAIN_ENGINE_LIMIT, LEFT_RIGHT_ENGINE_LIMIT]
-    ACTION_NUM_BUCKETS = [5,7]
+    ACTION_NUM_BUCKETS = [4,4]
 
     # table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
     # table2, buckets2 = compact_Q_table(NUM_BUCKETS, LIMITS, ACTION_NUM_BUCKETS, ACTION_LIMITS, 'concat')
@@ -85,11 +85,12 @@ if __name__=='__main__':
 
     pass
     # agent1 = DiscreteAgent(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
-    agent1 = DiscreteAgent_compact(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
-    trainer = TD0_Trainer(0.5, epsilon=0.6, discount=0.999, lamda=1)
-    trainer.train(env,agent1,2000,25)
+    # agent1 = DiscreteAgent_compact(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    # trainer = TD0_Trainer(0.3, epsilon=0.3, discount=0.99, lamda=1)
+    # trainer.train(env,agent1,2000,25)
 
-    # agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
-    # trainer = QLearningTrainer(0.5, epsilon=0.1, discount=0.9, update_freq=10)
-    # trainer.train(env, agent2, 200, 20)
+    agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    # trainer = QLearningTrainer(0.01, epsilon=0.1, discount=0.9, update_freq=25)
+    trainer = BatchedTrainer(0.01, 128, 10000, epsilon=0.1, discount=0.9, update_freq=10)
+    trainer.train(env, agent2, 1000, 50)
 

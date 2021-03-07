@@ -92,14 +92,15 @@ class ContinuousQLearningAgent(Agent):
 
         self.q_net = nn.Sequential(
             nn.Linear(obs_size, 64),
+            nn.ReLU(),
             nn.Linear(64, 64),
+            nn.ReLU(),
             nn.Linear(64, self.num_actions)
         ).to(device)
 
 
-
     def predict(self, observation, epsilon=0):
-        observation = torch.Tensor(observation).to(device)
+        observation = torch.tensor(observation).to(device)
         if self.mode == 'train':
             if random.random() >= epsilon:
                 q_values = self.q_net(observation)
@@ -110,17 +111,15 @@ class ContinuousQLearningAgent(Agent):
                 predicted_index = random.randint(0, self.num_actions-1)
                 predicted_action = self.actions[predicted_index]
                 q_values = self.q_net(observation)
+            return predicted_action, q_values
 
         elif self.mode == 'test':
             q_values = self.q_net(observation)
             (_, predicted_index)= torch.max(q_values, dim=0)
             predicted_action = self.actions[predicted_index]
-
             return predicted_action
 
         else: raise Exception("Invalid mode!")
-
-        return (predicted_action, q_values)
 
 
 
@@ -151,28 +150,14 @@ class DiscreteAgent_compact(Agent):
                 action1 = a_index // (self.n_action_buckets[1]+2)
                 action2 = a_index % (self.n_action_buckets[1]+2)
                 predicted_action = np.array([self.buckets[-2][action1-1], self.buckets[-1][action2-1]])
-                # last_buckets = self.buckets[-2:]
-                # for d in range(2):
-                #     predicted_action[d] = last_buckets[d][action_indices[d]]
+
             else: # exploration
-                # dim_actions = len(self.n_action_buckets) # = 2
-                # last_buckets = self.buckets[-2:]
-                # random_actions = np.zeros(2)
                 random_action1 = np.random.choice(self.buckets[-2])
                 random_action2 = np.random.choice(self.buckets[-1])
-                # for d in range(2):
-                #     random_actions[d] = np.random.choice(self.buckets[-2:][d])
+
                 predicted_action = np.array([random_action1, random_action2])
         elif self.mode=='test':
             # always greedy
-            # indices = tuple(observation_to_bucket(observation, self.buckets))
-            # obs_slice = self.table[tuple(indices)]
-            # action_indices = np.unravel_index(np.argmax(obs_slice.to(device=torch.device('cpu')), axis=None), obs_slice.shape)
-            # dim_actions = len(self.n_action_buckets)  # = 2
-            # predicted_action = np.zeros(dim_actions)
-            # last_buckets = self.buckets[-dim_actions:]
-            # for d in range(dim_actions):
-            #     predicted_action[d] = last_buckets[d][action_indices[d]]
             indices = tuple(observation_to_bucket(observation, self.buckets))
             s_index = buckets2index(self.buckets[:-2], self.n_obs_buckets, indices, observation)
             a_index = torch.argmax(self.table[s_index])
