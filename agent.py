@@ -4,7 +4,7 @@ import random
 import itertools
 import torch
 import torch.nn as nn
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda:1') if torch.cuda.is_available() else torch.device('cpu')
 
 class Agent:
     def __init__(self):
@@ -87,6 +87,10 @@ class ContinuousQLearningAgent(Agent):
         _, buckets = make_table_and_buckets(n_action_buckets, action_ranges)
         buckets = [list(arr) for arr in buckets]
         self.actions = list(itertools.product(*buckets))
+        # get reverse mapping from list
+        self.action_to_index = {
+            action:i for i, action in enumerate(self.actions)
+        }
         self.num_actions = len(self.actions)
 
 

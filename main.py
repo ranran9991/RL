@@ -30,14 +30,14 @@ if __name__=='__main__':
     MAIN_ENGINE_LIMIT = (-1, 1)
     LEFT_RIGHT_ENGINE_LIMIT = (-1, 1)
     ACTION_LIMITS = [MAIN_ENGINE_LIMIT, LEFT_RIGHT_ENGINE_LIMIT]
-    ACTION_NUM_BUCKETS = [4,4]
+    ACTION_NUM_BUCKETS = [8, 8]
 
     # table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
     # table2, buckets2 = compact_Q_table(NUM_BUCKETS, LIMITS, ACTION_NUM_BUCKETS, ACTION_LIMITS, 'concat')
 
     env = gym.make('LunarLanderContinuous-v2')
     obs = env.reset()
-    env.render()
+    #env.render()
 
     # action = env.action_space.sample()
     # observation, reward, done, info = env.step(action)
@@ -83,7 +83,6 @@ if __name__=='__main__':
     #
     # plt.show()
 
-    pass
     # agent1 = DiscreteAgent(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # agent1 = DiscreteAgent_compact(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # trainer = TD0_Trainer(0.3, epsilon=0.3, discount=0.99, lamda=1)
@@ -91,6 +90,6 @@ if __name__=='__main__':
 
     agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # trainer = QLearningTrainer(0.01, epsilon=0.1, discount=0.9, update_freq=25)
-    trainer = BatchedTrainer(0.01, 128, 10000, epsilon=0.1, discount=0.9, update_freq=10)
+    trainer = BatchedTrainer(0.5, 128, 10000, epsilon=0.2, discount=0.99, update_freq=10)
     trainer.train(env, agent2, 1000, 50)
 

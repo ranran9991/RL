@@ -192,10 +192,11 @@ class BatchedTrainer:
                 print(print_output, end='')
                 (action, curr_q_val) = self.policy_net.predict(obs, epsilon=self.epsilon)
                 observation, reward, done, _ = env.step(np.array(action))
+                action = agent.action_to_index[action]
                 f = lambda t: torch.tensor(t,dtype=torch.float).to(device).unsqueeze(dim=0)
-                self.replay_buffer.push(f(obs), f(action), f(observation), f(reward))
+                self.replay_buffer.push(f(obs), torch.tensor(action, dtype=torch.long).to(device).unsqueeze(dim=0), f(observation), f(reward))
                 self.train_batch(agent)
-
+                steps += 1
                 obs = observation
 
             steps_list.append(steps)
@@ -204,7 +205,7 @@ class BatchedTrainer:
                 agent.mode='test'
                 print(f"\n\tEvaluating: ",end='')
                 show_render = e%(5*eval_freq)==0
-                avg_reward = evaulate(env, agent,show_render=show_render)
+                avg_reward = evaulate(env, agent,show_render=False)
                 rewards_list.append(avg_reward)
                 print(f"avg reward = {avg_reward}",end='') # insert weights_and_biases !
                 # print(f"Finished Evaluation")
@@ -232,16 +233,17 @@ class BatchedTrainer:
         sampled_transitions = self.replay_buffer.sample(self.batch_size)
         batch = Transition(*zip(*sampled_transitions))
 
-        state_batch = torch.cat(batch.state,dim=0)
-        action_batch = torch.cat(batch.action,dim=0)
-        reward_batch = torch.cat(batch.reward,dim=0)
+        state_batch = torch.cat(batch.state, dim=0)
+        action_batch = torch.cat(batch.action, dim=0)
+        reward_batch = torch.cat(batch.reward, dim=0)
 
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), device=device, dtype=torch.bool)
         non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
 
         # state_action_values = agent.predict(state_batch).gather(1, action_batch)
-        state_action_values = agent.q_net(state_batch).gather(1, action_batch)
-
+        # gather by picked action
+        prediction = agent.q_net(state_batch)
+        state_action_values = torch.gather(prediction, 1, action_batch.reshape((action_batch.size(0), 1)))
 
         next_state_values = torch.zeros(self.batch_size, device=device)
         next_state_values[non_final_mask] = self.policy_net.q_net(non_final_next_states).max(1)[0].detach()
@@ -254,6 +256,4 @@ class BatchedTrainer:
         # Optimize the model
         self.optimizer.zero_grad()
         loss.backward()
-        for param in self.policy_net.parameters():
-            param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
