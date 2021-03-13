@@ -105,10 +105,13 @@ class ContinuousQLearningAgent(Agent):
 
     def predict(self, observation, epsilon=0):
         observation = torch.tensor(observation).to(device)
+        if len(observation.size()) == 1:
+            observation = observation[None, :]
+            
         if self.mode == 'train':
             if random.random() >= epsilon:
                 q_values = self.q_net(observation)
-                (_, predicted_index)= torch.max(q_values, dim=0)
+                (_, predicted_index)= torch.max(q_values, dim=1)
                 predicted_action = self.actions[predicted_index]
             else:
                 # generate random
@@ -119,12 +122,65 @@ class ContinuousQLearningAgent(Agent):
 
         elif self.mode == 'test':
             q_values = self.q_net(observation)
-            (_, predicted_index)= torch.max(q_values, dim=0)
+            (_, predicted_index)= torch.max(q_values, dim=1)
             predicted_action = self.actions[predicted_index]
             return predicted_action
 
         else: raise Exception("Invalid mode!")
 
+
+class DuelingNet(nn.Module):
+    def __init__(self, state_size, action_size):
+        super().__init__()
+        self.state_size = state_size
+        self.action_size = action_size
+
+        self.body = nn.Sequential(
+            nn.Linear(state_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU()
+        )
+
+        self.v_head = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_size)
+        )
+
+        self.a_head = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, action_size)
+        )
+
+    def forward(self, state):
+
+        x = self.body(state)
+        val = self.v_head(x)
+        adv = self.a_head(x)
+        # Q = V + A(a) - 1/|A| * sum A(a')
+        output = val + adv - adv.mean(1).unsqueeze(1).expand(state.size(0), self.action_size)
+        return output
+
+class DuelingContinuousQLearningAgent(ContinuousQLearningAgent):
+    def __init__(self, obs_size, n_action_buckets, action_ranges):
+        super().__init__(obs_size, n_action_buckets, action_ranges)
+
+
+        self.obs_size = obs_size
+
+        _, buckets = make_table_and_buckets(n_action_buckets, action_ranges)
+        buckets = [list(arr) for arr in buckets]
+        self.actions = list(itertools.product(*buckets))
+        # get reverse mapping from list
+        self.action_to_index = {
+            action:i for i, action in enumerate(self.actions)
+        }
+        self.num_actions = len(self.actions)
+
+
+        self.q_net = DuelingNet(obs_size, self.num_actions).to(device)
 
 
 

@@ -211,8 +211,8 @@ class BatchedTrainer:
                 # print(f"Finished Evaluation")
 
                 # Epsilon & lr decay:
-                self.epsilon = self.epsilon * 0.94**(e // eval_freq)
-                self.lr = self.lr * 0.98**(e//eval_freq)
+                self.epsilon = self.epsilon * 0.85 **(e // eval_freq)
+                #self.lr = self.lr * 0.98**(e//eval_freq)
 
             print(f"\nFinished episode {e}")
             # print("done.")

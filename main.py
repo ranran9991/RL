@@ -30,7 +30,7 @@ if __name__=='__main__':
     MAIN_ENGINE_LIMIT = (-1, 1)
     LEFT_RIGHT_ENGINE_LIMIT = (-1, 1)
     ACTION_LIMITS = [MAIN_ENGINE_LIMIT, LEFT_RIGHT_ENGINE_LIMIT]
-    ACTION_NUM_BUCKETS = [8, 8]
+    ACTION_NUM_BUCKETS = [10, 10]
 
     # table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
     # table2, buckets2 = compact_Q_table(NUM_BUCKETS, LIMITS, ACTION_NUM_BUCKETS, ACTION_LIMITS, 'concat')
@@ -88,8 +88,8 @@ if __name__=='__main__':
     # trainer = TD0_Trainer(0.3, epsilon=0.3, discount=0.99, lamda=1)
     # trainer.train(env,agent1,2000,25)
 
-    agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    agent2 = DuelingContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # trainer = QLearningTrainer(0.01, epsilon=0.1, discount=0.9, update_freq=25)
-    trainer = BatchedTrainer(0.5, 128, 10000, epsilon=0.2, discount=0.99, update_freq=10)
+    trainer = BatchedTrainer(0.001, 64, 10000, epsilon=0.5, discount=0.99, update_freq=10)
     trainer.train(env, agent2, 1000, 50)
 
