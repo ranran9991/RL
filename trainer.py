@@ -196,9 +196,10 @@ class BatchedTrainer:
                 f = lambda t: torch.tensor(t,dtype=torch.float).to(device).unsqueeze(dim=0)
                 self.replay_buffer.push(f(obs), torch.tensor(action, dtype=torch.long).to(device).unsqueeze(dim=0), f(observation), f(reward))
                 self.train_batch(agent)
+
                 steps += 1
                 obs = observation
-
+            
             steps_list.append(steps)
 
             if e % eval_freq==0 and e!=0:
@@ -230,6 +231,8 @@ class BatchedTrainer:
         if len(self.replay_buffer)<self.batch_size:
             return
 
+        self.optimizer.zero_grad()
+
         sampled_transitions = self.replay_buffer.sample(self.batch_size)
         batch = Transition(*zip(*sampled_transitions))
 
@@ -242,18 +245,17 @@ class BatchedTrainer:
 
         # state_action_values = agent.predict(state_batch).gather(1, action_batch)
         # gather by picked action
-        prediction = agent.q_net(state_batch)
+        prediction = self.policy_net.q_net(state_batch)
         state_action_values = torch.gather(prediction, 1, action_batch.reshape((action_batch.size(0), 1)))
 
         next_state_values = torch.zeros(self.batch_size, device=device)
-        next_state_values[non_final_mask] = self.policy_net.q_net(non_final_next_states).max(1)[0].detach()
+        next_state_values[non_final_mask] = agent.q_net(non_final_next_states).max(1)[0].detach()
 
         expected_state_action_values = (next_state_values * self.discount) + reward_batch
 
         # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values.unsqueeze(1))
+        loss = F.mse_loss(state_action_values, expected_state_action_values.unsqueeze(1))
 
         # Optimize the model
-        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()

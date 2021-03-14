@@ -95,11 +95,11 @@ class ContinuousQLearningAgent(Agent):
 
 
         self.q_net = nn.Sequential(
-            nn.Linear(obs_size, 64),
+            nn.Linear(obs_size, 150),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(150, 120),
             nn.ReLU(),
-            nn.Linear(64, self.num_actions)
+            nn.Linear(120, self.num_actions)
         ).to(device)
 
 
@@ -136,20 +136,20 @@ class DuelingNet(nn.Module):
         self.action_size = action_size
 
         self.body = nn.Sequential(
-            nn.Linear(state_size, 64),
+            nn.Linear(state_size, 150),
             nn.ReLU(),
-            nn.Linear(64, 64),
+            nn.Linear(150, 120),
             nn.ReLU()
         )
 
         self.v_head = nn.Sequential(
-            nn.Linear(64, 64),
+            nn.Linear(120, 64),
             nn.ReLU(),
             nn.Linear(64, action_size)
         )
 
         self.a_head = nn.Sequential(
-            nn.Linear(64, 64),
+            nn.Linear(120, 64),
             nn.ReLU(),
             nn.Linear(64, action_size)
         )
