@@ -9,6 +9,7 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import deque
 
 class Trainer:
     def __init__(self, lr, epsilon, discount):
@@ -157,22 +158,26 @@ class QLearningTrainer(Trainer):
 
 
 class BatchedTrainer:
-    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq):
+    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay, is_noisy=False):
         self.lr = lr
         self.epsilon = epsilon
         self.discount = discount
         self.batch_size = batch_size
         self.replay_buffer = ReplayMemory(buffer_capacity)
         self.update_freq = update_freq
+        self.eps_decay = eps_decay
+        self.is_noisy = is_noisy
         self.policy_net = None
         self.optimizer = None
 
     def train(self, env, agent:ContinuousQLearningAgent, episodes, eval_freq):
         t0=datetime.now()
         print(f"Run started at {t0}")
-        rewards_list, steps_list = [], []
-
+        steps_list, rewards_list = [], []
+        average_reward = []
+        scores_window = deque(maxlen=100)
         self.policy_net = copy.deepcopy(agent)
+        self.policy_net.q_net.to(device)
         self.optimizer = optim.Adam(self.policy_net.q_net.parameters(), lr = self.lr)
 
         for e in range(episodes):
@@ -184,37 +189,63 @@ class BatchedTrainer:
                 agent.q_net.load_state_dict(self.policy_net.q_net.state_dict())
 
             obs = env.reset()
+            if self.is_noisy:
+                noise = np.random.normal(loc=0.0, scale=0.05, size=2)
+                obs[0] += noise[0]
+                obs[1] += noise[1]
+
             done = False
             steps = 1
-
+            # score is the accumilated reward of the current episode
+            score = 0.
             while not done:
                 print_output = f" {steps} " if (steps % 10 == 0 or steps == 1) else "."
                 print(print_output, end='')
                 (action, curr_q_val) = self.policy_net.predict(obs, epsilon=self.epsilon)
                 observation, reward, done, _ = env.step(np.array(action))
+                if self.is_noisy:
+                    noise = np.random.normal(loc=0.0, scale=0.05, size=2)
+                    observation[0] += noise[0]
+                    observation[1] += noise[1]
+
                 action = agent.action_to_index[action]
                 f = lambda t: torch.tensor(t,dtype=torch.float).to(device).unsqueeze(dim=0)
                 self.replay_buffer.push(f(obs), torch.tensor(action, dtype=torch.long).to(device).unsqueeze(dim=0), f(observation), f(reward))
                 self.train_batch(agent)
 
+ 
                 steps += 1
+                score += reward
                 obs = observation
             
+            self.epsilon = max(self.epsilon * self.eps_decay, 0.01)
+
+            print(f'Episode score: {score:.2f}, next epsilon: {self.epsilon:.4f}')
+            scores_window.append(score)
+            rewards_list.append(score)
             steps_list.append(steps)
+            if len(scores_window) == 100:
+                average_reward.append(scores_window)
+            if np.mean(scores_window) >= 200.0 and len(scores_window) == 100:
+                print(f'Environment solved in {e-100.:.2f} episodes with reward {np.mean(scores_window):.2f}')
+                plt.figure()
+                plt.plot(rewards_list)
+                plt.xlabel('episodes')
+                plt.ylabel('Comulative Reward')
+                plt.title('Comulative reward per episode')
+                #plt.show()
+                plt.savefig('comulative rewards.png', format='png')
 
-            if e % eval_freq==0 and e!=0:
-                agent.mode='test'
-                print(f"\n\tEvaluating: ",end='')
-                show_render = e%(5*eval_freq)==0
-                avg_reward = evaulate(env, agent,show_render=False)
-                rewards_list.append(avg_reward)
-                print(f"avg reward = {avg_reward}",end='') # insert weights_and_biases !
-                # print(f"Finished Evaluation")
+                plt.figure()
+                plt.plot(average_reward, list(range(100, len(average_reward+100))))
+                plt.xlabel('episodes')
+                plt.ylabel('Average Comulative Reward')
+                plt.title('Average Comulative reward over 100 episodes')
+                #plt.show()
+                plt.savefig('Average rewards.png', format='png')
 
-                # Epsilon & lr decay:
-                self.epsilon = self.epsilon * 0.85 **(e // eval_freq)
-                #self.lr = self.lr * 0.98**(e//eval_freq)
-
+                return
+            
             print(f"\nFinished episode {e}")
             # print("done.")
 
@@ -224,8 +255,8 @@ class BatchedTrainer:
 
         plt.figure()
         plt.plot(rewards_list)
-        plt.show()
-
+        #plt.show()
+        plt.savefig('rewards.png', format='png')
 
     def train_batch(self, agent:ContinuousQLearningAgent):
         if len(self.replay_buffer)<self.batch_size:
@@ -236,9 +267,9 @@ class BatchedTrainer:
         sampled_transitions = self.replay_buffer.sample(self.batch_size)
         batch = Transition(*zip(*sampled_transitions))
 
-        state_batch = torch.cat(batch.state, dim=0)
-        action_batch = torch.cat(batch.action, dim=0)
-        reward_batch = torch.cat(batch.reward, dim=0)
+        state_batch = torch.cat(batch.state, dim=0).to(device)
+        action_batch = torch.cat(batch.action, dim=0).to(device)
+        reward_batch = torch.cat(batch.reward, dim=0).to(device)
 
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), device=device, dtype=torch.bool)
         non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
@@ -259,3 +290,81 @@ class BatchedTrainer:
         # Optimize the model
         loss.backward()
         self.optimizer.step()
+
+
+class RainbowTrainer(BatchedTrainer):
+    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay):
+        super().__init__(lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay)
+
+        self.v_min = None
+        self.v_max = None
+        self.support = None
+        self.atom_size = None
+
+    def train(self, env, agent : RainbowAgent, episodes, eval_freq):
+        self.v_min = agent.v_min
+        self.v_max = agent.v_max
+        self.support = agent.support
+        self.atom_size = agent.atom_size
+
+
+        super().train(env, agent, episodes, eval_freq)
+
+
+    def train_batch(self, agent : RainbowAgent):
+        if len(self.replay_buffer)<self.batch_size:
+            return
+
+        self.optimizer.zero_grad()
+
+        sampled_transitions = self.replay_buffer.sample(self.batch_size)
+        batch = Transition(*zip(*sampled_transitions))
+
+        state_batch = torch.cat(batch.state, dim=0).to(device)
+        action_batch = torch.cat(batch.action, dim=0).to(device)
+        reward_batch = torch.cat(batch.reward, dim=0).reshape(-1, 1).to(device)
+
+        non_final_mask = torch.tensor(tuple(map(lambda s: s is not None, batch.next_state)), device=device, dtype=torch.bool)
+        non_final_next_states = torch.cat([s for s in batch.next_state if s is not None]).to(device)
+
+        delta_z = float(self.v_max - self.v_min) / (self.atom_size - 1)
+
+        with torch.no_grad():
+            next_action = torch.zeros(self.batch_size, device=device, dtype=torch.long)
+            next_action[non_final_mask] = agent.q_net(non_final_next_states).argmax(1)
+
+            next_dist = torch.zeros((self.batch_size, agent.num_actions, self.atom_size), device=device)
+            next_dist[non_final_mask] = agent.q_net.calc_dist(non_final_next_states)
+            next_dist = next_dist[range(self.batch_size), next_action]
+            
+            is_done_tensor = non_final_mask.float().reshape(-1, 1)
+            t_z = reward_batch +  is_done_tensor * self.discount * self.support
+
+            t_z = t_z.clamp(min=self.v_min, max=self.v_max)
+            b = (t_z - self.v_min) / delta_z
+            l = b.floor().long()
+            u = b.ceil().long()
+
+            offset = torch.linspace(
+                0, (self.batch_size - 1) * self.atom_size, self.batch_size
+            ).long().unsqueeze(1).expand(self.batch_size, self.atom_size).to(device)
+
+            proj_dist = torch.zeros(next_dist.size(), device=device)
+            proj_dist.view(-1).index_add_(
+                0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1)
+            )
+            proj_dist.view(-1).index_add_(
+                0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1)
+            )
+
+        dist = self.policy_net.q_net.calc_dist(state_batch)
+        log_p = torch.log(dist[range(self.batch_size), action_batch])
+
+        loss = -(proj_dist * log_p).sum(1).mean()
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        agent.q_net.reset_noise()
+        self.policy_net.q_net.reset_noise()

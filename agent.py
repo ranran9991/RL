@@ -1,9 +1,14 @@
 # from utils import *
+from typing import OrderedDict
+
+from torch.nn.modules.linear import Linear
 from discretize import *
 import random
 import itertools
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from layers import NoisyLinear
 device = torch.device('cuda:1') if torch.cuda.is_available() else torch.device('cpu')
 
 class Agent:
@@ -229,3 +234,180 @@ class DiscreteAgent_compact(Agent):
         else: raise Exception("Invalid mode!")
 
         return predicted_action
+
+
+
+
+
+class ContinuousQLearningAgent(Agent):
+    def __init__(self, obs_size, n_action_buckets, action_ranges):
+        super().__init__()
+
+
+        self.obs_size = obs_size
+
+        _, buckets = make_table_and_buckets(n_action_buckets, action_ranges)
+        buckets = [list(arr) for arr in buckets]
+        self.actions = list(itertools.product(*buckets))
+        # get reverse mapping from list
+        self.action_to_index = {
+            action:i for i, action in enumerate(self.actions)
+        }
+        self.num_actions = len(self.actions)
+
+        self.q_net = nn.Sequential(
+            nn.Linear(obs_size, 150),
+            nn.ReLU(),
+            nn.Linear(150, 120),
+            nn.ReLU(),
+            nn.Linear(120, self.num_actions)
+        ).to(device)
+
+
+    def predict(self, observation, epsilon=0):
+        observation = torch.tensor(observation).to(device)
+        if len(observation.size()) == 1:
+            observation = observation[None, :]
+            
+        if self.mode == 'train':
+            if random.random() >= epsilon:
+                q_values = self.q_net(observation)
+                (_, predicted_index)= torch.max(q_values, dim=1)
+                predicted_action = self.actions[predicted_index]
+            else:
+                # generate random
+                predicted_index = random.randint(0, self.num_actions-1)
+                predicted_action = self.actions[predicted_index]
+                q_values = self.q_net(observation)
+            return predicted_action, q_values
+
+        elif self.mode == 'test':
+            q_values = self.q_net(observation)
+            (_, predicted_index)= torch.max(q_values, dim=1)
+            predicted_action = self.actions[predicted_index]
+            return predicted_action
+
+        else: raise Exception("Invalid mode!")
+
+
+
+class RainbowNet(nn.Module):
+    # This net is comprised of:
+    # -  Dueling - seperate heads for V(s_t) and A(s_t)
+    # - Categorial Q learning - output is a distribution of rewards over atom support
+    # - NoisyNet - noisy linear layers 
+    def __init__(self, in_dim, out_dim, atom_size, support):
+        super(RainbowNet, self).__init__()
+        
+        self.support = support
+        self.out_dim = out_dim
+        self.atom_size = atom_size
+
+        self.feature_layer = nn.Sequential(
+            nn.Linear(in_dim, 128),
+            nn.ReLU()
+        )
+        
+        self.advantage = nn.Sequential(OrderedDict([
+            ('adv_nl1', NoisyLinear(128, 128)),
+            ('adv_nl2', NoisyLinear(128, out_dim * atom_size))
+        ]))
+
+        self.value = nn.Sequential(OrderedDict([
+            ('val_nl1', NoisyLinear(128, 128)),
+            ('val_nl2', NoisyLinear(128, atom_size))
+        ]))
+
+
+    
+    def forward(self, x):
+        """
+            This function calculates the q values using the distribution over atoms
+        """
+        dist = self.calc_dist(x)
+        q = torch.sum(dist * self.support, dim=2)
+
+        return q
+
+    
+    def calc_dist(self, x):
+        """
+            This function calculates the distribution over the atom support
+        """
+        x = self.feature_layer(x)
+        adv = self.advantage(x).view(
+            -1, self.out_dim, self.atom_size
+        )
+        value = self.value(x).view(
+            -1, 1, self.atom_size
+        )
+
+        # Q(s) = V(s) + A(s,a) - 1/|A| sum(A(s, a'))
+        q_atoms = value + adv - adv.mean(dim=1, keepdim=True)
+
+        dist = F.softmax(q_atoms, dim=-1)
+        dist = dist.clamp(min=1e-3)
+
+        return dist
+    
+    def reset_noise(self):        
+        self.advantage._modules['adv_nl1'].reset_noise()
+        self.advantage._modules['adv_nl2'].reset_noise()
+
+        self.value._modules['val_nl1'].reset_noise()
+        self.value._modules['val_nl2'].reset_noise()
+
+
+
+
+class RainbowAgent(Agent):
+    def __init__(self, obs_size, n_action_buckets, action_ranges, v_min, v_max, atom_size):
+        super().__init__()
+
+
+        self.obs_size = obs_size
+
+        _, buckets = make_table_and_buckets(n_action_buckets, action_ranges)
+        buckets = [list(arr) for arr in buckets]
+        self.actions = list(itertools.product(*buckets))
+        # get reverse mapping from list
+        self.action_to_index = {
+            action:i for i, action in enumerate(self.actions)
+        }
+        self.num_actions = len(self.actions)
+
+
+        self.v_min = v_min
+        self.v_max = v_max
+        self.atom_size = atom_size
+        self.support  = torch.linspace(
+            self.v_min, self.v_max, self.atom_size
+        ).to(device)
+
+        self.q_net = RainbowNet(obs_size, self.num_actions, self.atom_size, self.support).to(device)
+
+
+    def predict(self, observation, epsilon=0):
+        observation = torch.tensor(observation).to(device)
+        if len(observation.size()) == 1:
+            observation = observation[None, :]
+            
+        if self.mode == 'train':
+            if random.random() >= epsilon:
+                q_values = self.q_net(observation)
+                (_, predicted_index)= torch.max(q_values, dim=1)
+                predicted_action = self.actions[predicted_index]
+            else:
+                # generate random
+                predicted_index = random.randint(0, self.num_actions-1)
+                predicted_action = self.actions[predicted_index]
+                q_values = self.q_net(observation)
+            return predicted_action, q_values
+
+        elif self.mode == 'test':
+            q_values = self.q_net(observation)
+            (_, predicted_index)= torch.max(q_values, dim=1)
+            predicted_action = self.actions[predicted_index]
+            return predicted_action
+
+        else: raise Exception("Invalid mode!")

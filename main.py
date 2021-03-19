@@ -4,7 +4,7 @@ import gym
 # from sys import getsizeof
 from discretize import *
 from trainer import *
-from agent import DiscreteAgent, DiscreteAgent_compact, ContinuousQLearningAgent
+from agent import DiscreteAgent, DiscreteAgent_compact, ContinuousQLearningAgent, RainbowAgent
 # from time import time
 
 if __name__=='__main__':
@@ -30,7 +30,7 @@ if __name__=='__main__':
     MAIN_ENGINE_LIMIT = (-1, 1)
     LEFT_RIGHT_ENGINE_LIMIT = (-1, 1)
     ACTION_LIMITS = [MAIN_ENGINE_LIMIT, LEFT_RIGHT_ENGINE_LIMIT]
-    ACTION_NUM_BUCKETS = [4, 4]
+    ACTION_NUM_BUCKETS = [8, 8]
 
     # table, buckets = make_table_and_buckets(NUM_BUCKETS, LIMITS)
     # table2, buckets2 = compact_Q_table(NUM_BUCKETS, LIMITS, ACTION_NUM_BUCKETS, ACTION_LIMITS, 'concat')
@@ -83,13 +83,24 @@ if __name__=='__main__':
     #
     # plt.show()
 
+    # DISCRETE AGENT
     # agent1 = DiscreteAgent(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # agent1 = DiscreteAgent_compact(NUM_BUCKETS, LIMITS, True, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # trainer = TD0_Trainer(0.3, epsilon=0.3, discount=0.99, lamda=1)
     # trainer.train(env,agent1,2000,25)
-
-    agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
+    # NORMAL Q LEARNING AGNET
+    #agent2 = ContinuousQLearningAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS)
     # trainer = QLearningTrainer(0.01, epsilon=0.1, discount=0.9, update_freq=25)
-    trainer = BatchedTrainer(0.0001, 64, 10000, epsilon=0.3, discount=0.99, update_freq=10)
-    trainer.train(env, agent2, 500, 50)
+    #trainer = BatchedTrainer(0.0001, 64, 10000, epsilon=1., discount=0.99, update_freq=5, eps_decay=0.996)
+    #trainer.train(env, agent2, 1000, 50)
+
+    # RAINBOW
+    v_min = -100.
+    v_max = 100.
+    atom_size = 51
+    agent3 = RainbowAgent(8, ACTION_NUM_BUCKETS, ACTION_LIMITS, v_min, v_max, atom_size)
+    # trainer = QLearningTrainer(0.01, epsilon=0.1, discount=0.9, update_freq=25)
+    trainer = RainbowTrainer(0.0001, 64, 10000, epsilon=1.,   discount=0.99, update_freq=5, eps_decay=0.997)
+    trainer.train(env, agent3, 700, 50)
+
 
