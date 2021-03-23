@@ -12,10 +12,11 @@ import torch.nn.functional as F
 from collections import deque
 
 class Trainer:
-    def __init__(self, lr, epsilon, discount):
+    def __init__(self, lr, epsilon, discount, eps_decay):
         self.lr = lr
         self.epsilon = epsilon
         self.discount = discount
+        self.eps_decay = eps_decay
 
     @abstractmethod
     def train_episode(self, env, agent):
@@ -24,29 +25,57 @@ class Trainer:
     def train(self, env, agent:Agent, episodes, eval_freq):
         t0=datetime.now()
         print(f"Run started at {t0}")
-        rewards_list, steps_list = [], []
+        steps_list, rewards_list, rewards_list_test = [], [], []
+        average_reward = []
+        scores_window = deque(maxlen=100)
+
         for e in range(episodes):
             agent.mode = 'train'
             # print(f"Starting episode {e}: steps performed: ",end='')
             print(f"Episode {e}: steps performed: ",end='')
-            steps = self.train_episode(env, agent)
+
+            steps, score = self.train_episode(env, agent)
+
+            print(f'Episode score: {score:.2f}, next epsilon: {self.epsilon:.4f}')
+            scores_window.append(score)
+            rewards_list.append(np.round(score, decimals=2))
             steps_list.append(steps)
+            if len(scores_window) == 100:
+                average_reward.append(scores_window)
 
             if e % eval_freq==0:
                 agent.mode='test'
                 print(f"\n\tEvaluating: ",end='')
-                show_render = e%(5*eval_freq)==0
-                avg_reward = evaulate(env, agent,show_render=show_render)
-                rewards_list.append(avg_reward)
-                print(f"avg reward = {avg_reward}",end='') # insert weights_and_biases !
+                show_render = e%eval_freq==0
+                avg_reward = evaulate(env, agent,show_render=False)
+                rewards_list_test.append(avg_reward)
+                print(f"avg reward = {avg_reward}") # insert weights_and_biases !
                 # print(f"Finished Evaluation")
 
                 # Epsilon & lr decay:
-                self.epsilon = self.epsilon * 0.94**(e // eval_freq)
+                self.epsilon = max(self.epsilon * self.eps_decay, 0.02)
                 self.lr = self.lr * 0.98**(e//eval_freq)
 
+            if np.mean(scores_window) >= 200.0 and len(scores_window) == 100:
+                print(f'Environment solved in {e - 100.:.2f} episodes with reward {np.mean(scores_window):.2f}')
+                plt.figure()
+                plt.plot(rewards_list)
+                plt.xlabel('episodes')
+                plt.ylabel('Comulative Reward')
+                plt.title('Comulative reward per episode')
+                plt.savefig('comulative rewards.png', format='png')
+
+                plt.figure()
+                plt.plot(average_reward, list(range(100, len(average_reward + 100))))
+                plt.xlabel('episodes')
+                plt.ylabel('Average Comulative Reward')
+                plt.title('Average Comulative reward over 100 episodes')
+                plt.savefig('Average rewards.png', format='png')
+
+                return
+
             print(f"\nFinished episode {e}")
-            # print("done.")
+
 
         print(f"Steps per episode: {steps_list}, avg = {np.round(np.mean(steps_list),2)}")
         print(f"Average rewards: {rewards_list}")
@@ -54,19 +83,30 @@ class Trainer:
 
         plt.figure()
         plt.plot(rewards_list)
-        plt.show()
+        plt.xlabel('Episodes')
+        plt.ylabel('Rewards')
+        plt.title('Average reward train mode')
+        # plt.show()
+        plt.savefig('rewards train.png', format='png')
 
+        plt.figure()
+        plt.plot(rewards_list_test)
+        plt.xlabel('Episodes')
+        plt.ylabel('Rewards')
+        plt.title('Average reward test mode')
+        # plt.show()
+        plt.savefig('rewards test.png', format='png')
 
 class TD0_Trainer(Trainer):
-    def __init__(self, lr, epsilon, discount, lamda):
-        super().__init__(lr, epsilon, discount)
+    def __init__(self, lr, epsilon, discount, lamda, eps_decay=0.9):
+        super().__init__(lr, epsilon, discount, eps_decay)
         self.lamda = lamda
 
     def train_episode(self, env, agent:DiscreteAgent):
         obs_curr = env.reset()
         done = False
         steps = 1
-        # MAX_STEPS = 150
+        score = 0. # score is the accumilated reward of the current episode
         while not done:
             # print(f"Step {steps}: started...",end=' ')
             print_output = f" {steps} " if (steps%10==0 or steps==1) else "."
@@ -78,7 +118,6 @@ class TD0_Trainer(Trainer):
             s_curr_index = buckets2index(agent.buckets[:-2], agent.n_obs_buckets, obs_curr_indices, obs_curr)
             a_curr_index = buckets2index(agent.buckets[-2:], agent.n_action_buckets, action_curr_indices, action_curr)
 
-
             obs_next, reward, done, _ = env.step(action_curr)
             action_next = np.array(agent.predict(obs_next,epsilon=self.epsilon))
 
@@ -89,13 +128,16 @@ class TD0_Trainer(Trainer):
 
 
             mat = agent.table[s_curr_index][a_curr_index]
-            agent.table[s_curr_index][a_curr_index] = (1 - self.lr) * mat + self.lr * (reward + self.discount * agent.table[s_next_index][a_next_index]) # Bellman Equation
+            agent.table[s_curr_index][a_curr_index] = (1 - self.lr) * mat + self.lr * \
+                                      (reward + self.discount * agent.table[s_next_index][a_next_index]) # Bellman Equation
 
             obs_curr = obs_next
-            # print(f"ended.")
             steps += 1
+            score += reward
+
         print(f" {steps}",end='')
-        return steps
+        return steps, score
+
 
 class QLearningTrainer(Trainer):
     def __init__(self, lr, epsilon, discount, update_freq):
@@ -225,7 +267,32 @@ class BatchedTrainer:
             rewards_list.append(score)
             steps_list.append(steps)
             if len(scores_window) == 100:
-                average_reward.append(scores_window)
+                average_reward.append(np.mean(scores_window))
+            
+            if e % eval_freq==0:
+                agent.mode='test'
+                avg_reward = evaulate(env, agent,show_render=False)
+                if avg_reward >= 200.0:
+                    print(f'Environment solved in {e:.2f} episodes with reward {avg_reward:.2f}')
+                    plt.figure()
+                    plt.plot(rewards_list)
+                    plt.xlabel('episodes')
+                    plt.ylabel('Comulative Reward')
+                    plt.title('Comulative reward per episode')
+                    #plt.show()
+                    plt.savefig('comulative rewards.png', format='png')
+
+                    plt.figure()
+                    plt.plot(list(range(100, len(average_reward)+100)), average_reward)
+                    plt.xlabel('episodes')
+                    plt.ylabel('Average Comulative Reward')
+                    plt.title('Average Comulative reward over 100 episodes')
+                    #plt.show()
+                    plt.savefig('Average rewards.png', format='png')
+
+                    return
+                
+
             if np.mean(scores_window) >= 200.0 and len(scores_window) == 100:
                 print(f'Environment solved in {e-100.:.2f} episodes with reward {np.mean(scores_window):.2f}')
                 plt.figure()
@@ -237,7 +304,7 @@ class BatchedTrainer:
                 plt.savefig('comulative rewards.png', format='png')
 
                 plt.figure()
-                plt.plot(average_reward, list(range(100, len(average_reward+100))))
+                plt.plot(list(range(100, len(average_reward)+100)), average_reward)
                 plt.xlabel('episodes')
                 plt.ylabel('Average Comulative Reward')
                 plt.title('Average Comulative reward over 100 episodes')
@@ -293,8 +360,8 @@ class BatchedTrainer:
 
 
 class RainbowTrainer(BatchedTrainer):
-    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay):
-        super().__init__(lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay)
+    def __init__(self, lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay, is_noisy=False):
+        super().__init__(lr, batch_size, buffer_capacity, epsilon, discount, update_freq, eps_decay, is_noisy)
 
         self.v_min = None
         self.v_max = None

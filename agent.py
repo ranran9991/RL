@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from layers import NoisyLinear
-device = torch.device('cuda:1') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
 class Agent:
     def __init__(self):
@@ -141,21 +141,17 @@ class DuelingNet(nn.Module):
         self.action_size = action_size
 
         self.body = nn.Sequential(
-            nn.Linear(state_size, 150),
+            nn.Linear(state_size, 120),
             nn.ReLU(),
-            nn.Linear(150, 120),
-            nn.ReLU()
         )
 
         self.v_head = nn.Sequential(
             nn.Linear(120, 64),
-            nn.ReLU(),
             nn.Linear(64, action_size)
         )
 
         self.a_head = nn.Sequential(
             nn.Linear(120, 64),
-            nn.ReLU(),
             nn.Linear(64, action_size)
         )
 
